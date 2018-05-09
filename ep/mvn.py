@@ -12,24 +12,23 @@ class Mvn:
     """
     Each Mvn is described by a d-sized vector mean and a dd-sized covariance matrix
     """
-    def __init__(self, mean, covars):
-        self.mvn = mv(mean, covars)
+    def __init__(self, mean, precision, weight = 1):
+        #self.mvn = mv(mean, inv(precision))
         self.mean = mean
-        self.covar = covars
-                
+        self.precision = precision
+        self.weight = weight
+
     def __mul__(self, other):
-        if isinstance(other, int):
-            return self
-        covar_hat = inv(inv(self.covar) + inv(other.covar))
-        mean_hat  =  np.dot(covar_hat, np.dot(inv(self.covar),self.mean) + np.dot(inv(other.covar), other.mean))
-        return Mvn(mean_hat, covar_hat)
+        precision_new = self.precision + other.precision
+        mean_new  =  np.dot(inv(precision_new), np.dot(self.precision,self.mean) + np.dot(other.precision, other.mean))
+        weight_new = 1#self.weight * other.weight
+        return Mvn(mean = mean_new, precision = precision_new, weight = weight_new)
 
     def __div__(self, other):
-        if isinstance(other, int):
-            return self
-        covar_hat = inv(inv(self.covar) - inv(other.covar))
-        mean_hat  =  np.dot(covar_hat, np.dot(inv(self.covar),self.mean) - np.dot(inv(other.covar), other.mean))
-        return Mvn(mean_hat, covar_hat)
+        precision_new = self.precision - other.precision
+        mean_new  =  np.dot(inv(precision_new), np.dot(self.precision,self.mean) - np.dot(other.precision, other.mean))
+        weight_new = 1#self.weight * other.weight
+        return Mvn(mean = mean_new, precision = precision_new, weight = weight_new)
 
         @property
         def mean(self):
@@ -40,18 +39,28 @@ class Mvn:
             self.mean = m 
 
         @property
-        def covar(self):
-            return self.covar
+        def pres(self):
+            return self.precision
 
-        @covar.setter
-        def covar(self, v):
-            self.covar = v
+        @precision.setter
+        def pres(self, v):
+            self.precision = v
+
+        @property
+        def pres(self):
+            return self.weight
+
+        @weight.setter
+        def pres(self, v):
+            self.weight = v
 
     def pdf(self, x):
         """
         Returns PDF of MVN at point x
         """
-        return self.mvn.pdf(x)
+        mvn = mv(self.mean,inv(self.precision))
+        return mvn.pdf(x)
    
     def logpdf(self, x):
-        return self.mvn.logpdf(x)
+        mvn = mv(self.mean,inv(self.precision))
+        return mvn.logpdf(x)

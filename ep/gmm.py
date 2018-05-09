@@ -1,6 +1,6 @@
 import numpy as np
 import sklearn.mixture
-from gmmmc.fastgmm import gmm_likelihood
+from ep.fastgmm import gmm_likelihood
 import multiprocessing
 
 class GMM():
@@ -18,6 +18,10 @@ class GMM():
         weights : 1-D array_like of shape (n_mixtures,)
             Weights for each of the GMM components
         """
+        if len(covariances.shape) == 2:
+            self.covariance_type = 'diag'
+        else:
+            raise NotImplementedError('Only diagonal covariance matrices supported')
         self.gmm = sklearn.mixture.GMM(n_components=len(weights))
         self.gmm.weights_ = weights
         self.gmm.covars_ = covariances

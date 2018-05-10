@@ -13,7 +13,7 @@ class Mvn:
     Each Mvn is described by a d-sized vector mean and a dd-sized covariance matrix
     """
     def __init__(self, mean, precision, weight = 1):
-        #self.mvn = mv(mean, inv(precision))
+        self.mvn = mv(mean, inv(precision))
         self.mean = mean
         self.precision = precision
         self.weight = weight

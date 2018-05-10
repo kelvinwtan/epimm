@@ -16,9 +16,9 @@ weights = np.array([ 0.4, 0.3, 0.15, 0.15])
 g = ep.gmm.GMM(means=means,
         covariances=covars,
         weights=weights)
-data = g.sample(10)
+data = g.sample(50)
 
-e = ep.epim.Epim(1.5,np.array([0,0]),np.array([[0.5,0],[0,0.5]]))
+e = ep.epim.Epim(1.5,np.array([0,0]),np.linalg.inv(np.array([[25,0],[0,25]])))
 t0 = time.time()
 
 e.fit(data)

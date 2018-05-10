@@ -10,7 +10,7 @@ class Epim:
     def __init__(self, alpha, mean_base, pres_base):
         #Dirichlet Hyperparameters
         self.alpha = alpha
-        self.mvn_base = Mvn(mean_base, pres_base)
+        self.innovation = Mvn(mean_base, pres_base)
 
         #fixed variance hyperparameter
         self.precision_fixed = np.eye(len(mean_base))
@@ -26,15 +26,23 @@ class Epim:
         n, d = data.shape
         m_ij = np.ndarray(shape=(n,n,d))
         v_ij = np.ndarray(shape=(n,n,d,d))
-        s_ij = np.ndarray(shape=(n,n))
+        s_ij = np.ones(shape=(n,n))
 
         qm = data
         qp = self.precision_fixed
 
-        t_i = np.ones(n) 
-        t_ik = [[None] * n] * n
+        t_i = np.ones(n)
+
+
+        ntrue = 0
+        nfalse = 0
+
+
+
+        #calculate message i->j 
         for i in range(n):
             t1 = time.time()
+            #ii when i = 0 is just its own prior
             if i == 0:
                 m_ij[0][0] = data[0]
                 v_ij[0][0] = self.precision_fixed
@@ -42,54 +50,69 @@ class Epim:
                 continue
             for j in range(i+1):
                 mu = 0
-                sig = 0
+                exp2 = 0
 
                 #N(tm, tp) is product of all the priors of the parents
                 tm = 0
                 tp = (j + 1)*qp
-              
                 if i == j:
                     for k in range (i):
                         tm = tm + qm[k]
-                    tm = np.dot(inv(tp),qm[k])
                 else:
                     tm = qm[i]
                     for k in range (j) + range(j+1,i):
                         tm = tm + qm[k]
-                    tm = np.dot(inv(tp),tm)    
-                z_i = 0
+                tm = np.dot(inv(tp),np.dot(qp,tm))
 
+                z_i = 0
                 #Marginals k < i
                 #For each team, find the marginal of each (delta x parents)
+
                 for k in range(i):
                     new_pres = tp + qp
                     new_mean = np.dot(inv(new_pres),(np.dot(tp,tm) + np.dot(qp,qm[k])))
-
-                    temp = Mvn(tm, tp + qp)
-                    s = temp.pdf(qm[k])
-                    
-                    z_i += s
-                    mu += s*new_mean
-                    sig += s*inv(new_pres)
+                    temp = Mvn(tm, inv(inv(tp) + inv(qp)))
+                    z_ij = temp.pdf(qm[k])*s_ij[i][j]
+                    z_i = z_i + z_ij
+                    mu = mu + new_mean * z_ij
+                    exp2 = exp2 + inv(new_pres) * z_ij
                 
-                pp = self.mvn_base.precision + tp
-                pm = np.dot(inv(pp), np.dot(self.mvn_base.precision, self.mvn_base.mean) + np.dot(tp,tm))
-
-                temp = Mvn(tm, inv(tp) + self.mvn_base.precision)
-                s = temp.pdf(self.mvn_base.mean)
-                z_i += self.alpha * s 
+                new_pres = self.innovation.precision + tp
+                new_mean = np.dot(inv(new_pres), np.dot(self.innovation.precision, self.innovation.mean) + np.dot(tp,tm))
+                
+                temp = Mvn(tm, inv(inv(tp) + inv(self.innovation.precision)))
+                z_ii = temp.pdf(self.innovation.mean)*s_ij[i][j]
+                z_i = (z_i + self.alpha * z_ii)#/ (i - 1 + self.alpha)
   
-                mu = (mu + self.alpha*s*pm) / z_i# / (z_i * (i - 1 + self.alpha))
-                sig = (sig + self.alpha*s*inv(pp)) / z_i# / (z_i * (i- 1 + self.alpha))
+                mu = (mu + self.alpha*new_mean*z_ii) / z_i
+                exp2 = (exp2 + self.alpha*inv(new_pres)*z_ii) / z_i
+                z_i = z_i/(i - 1 + self.alpha)
+  
                 c = np.atleast_2d(mu)
-                sig -= np.dot(c.T,c)
-                #print(sig)
-                z_i /= (i - 1 + self.alpha)
-                s_ij[i][j] = z_i
+                d = np.dot(c.T,c)
+                exp2 = exp2 - d
+#                print(exp2,d, exp2+d, self.check_posdef(exp2+d))
+
+                s_ij[i][j] = 1/z_i
                 m_ij[i][j] = mu
-                v_ij[i][j] = inv(sig)
+                v_ij[i][j] = inv(exp2)
+                
+                
+                #print(mu, " vs " , sig)
+              #  print("sig")
+                if self.check_posdef(exp2) == True:
+                    ntrue +=1
+                else:
+                    nfalse +=1
+                #Mvn(mu,inv(sig))
             t2 = time.time()
             print("For i = "+str(i)+" time = "+ str(t2-t1))
+        
+        print(ntrue,nfalse)
+
+        while True:
+            for i in range (4):
+                a = 2
         return m_ij, v_ij, s_ij
 
                 
@@ -97,8 +120,8 @@ class Epim:
         #Find Z_i
         if self.covar_type == "fixed":
         #Z_ii = \int_{\theta} p(\theta)q^{\i}(\theta_i = \theta)d\theta
-            t = Mvn(q_cavity_i[i].mean, q_cavity_i[i].covar + self.mvn_base.covar)
-            z_ii = t.pdf(self.mvn_base.mean)
+            t = Mvn(q_cavity_i[i].mean, q_cavity_i[i].covar + self.innovation.covar)
+            z_ii = t.pdf(self.innovation.mean)
             
             z_ji = []
             for j in range(i):
@@ -131,6 +154,8 @@ class Epim:
         z_ij = [[None for _ in range(i+1)] for _ in range(i+1)]
         theta_ji = [None for _ in range(i+1)]
         theta_ji_hat = [None for _ in range(i+1)]
+        
+        flag = True
         for j in range(i+1):
             k = 0
             r_ji = 0
@@ -139,60 +164,34 @@ class Epim:
 
             q_cav_ij = q_cav_i / f_ij[i][j]
             if self.check_posdef(inv(q_cav_ij.precision)):
+                flag = False
                 continue
 
             if i == j:
                 #Expectation for each factor
-                t1 = self.mvn_base*q_cav_ij
-                t2 = Mvn(q_cav_ij.mean, inv(self.mvn_base.precision) + inv(q_cav_ij.precision))
+                t1 = self.innovation*q_cav_ij
+                t2 = Mvn(q_cav_ij.mean, inv(self.innovation.precision) + inv(q_cav_ij.precision))
             
-                z_ij[i][j] = t2.pdf(self.mvn_base.mean)
-                z_i = z_i + z_ij[i][i]
-                theta_ji[i] = t1.mean
-                theta_ji_hat[i] = inv(t1.precision)
+                z_ij = t2.pdf(self.innovation.mean)
+                z_i = z_i + z_ij
+                mean += t1.mean * self.alpha * z_ij
+                covar += inv(t1.precision) * self.alpha * z_ij
 
             else:
                 #Expectaion for each factor
                 t1 = q_cav_ij * q_cav_ij
                 t2 = Mvn(q_cav_ij.mean, inv(q_cav_ij.precision) + inv(q_cav_ij[j][i].precision))
                 
-                z_ij[i][j] = t2.pdf(q_cav_ij.mean)
-                z_i = z_i + z_ij[i][j]
+                z_ij = t2.pdf(q_cav_ij.mean)
+                z_i = z_i + z_ij
 
-                theta_ji[j] = t1.mean
-                theta_ji_hat[j] = inv(t1.precision)
-
-        for j in range(i+1):
-            q_cav_ij = q_cav_i / f_ij[i][j]
-            if self.check_posdef(inv(q_cav_ij.precision)):
-                continue
-            mean_new = z_ij[i][j] * theta_ji[j]
-            covar_new = z_ij[i][j] * theta_ji_hat[j]
-            if i == j:
-                mean_new *= self.alpha
-                covar_new *= self.alpha
-            mean += mean_new
-            covar += covar_new
-
-        if mean == 0:
-            return Mvn(q_i[i].mean, q_i[i].precision)
+                mean += t1.mean * z_ij
+                covar += inv(t1.precision) * z_ij
 
         den = (z_i*(i - 1 + self.alpha))
-        q_i[i].mean = np.atleast_2d(mean / den)
-        covar = covar / den
-        q_i[i].precision = inv(covar - np.dot(mean.T, mean))
-
-        for j in range(i+1):
-            r_ij = z_ij[i][j]/den
-            inv_r_ij = 1 - r_ij
-
-            m1 = np.atleast_2d(theta_ji[i][j])
-            m2 = np.atleast_2d(m1 - q_cav_ij.mean)
-            
-            q_i[j].mean = inv_r_ij*q_cav_ij.mean + r_ij*theta_ji[j]
-            q_i[j].precision = inv(inv_r_ij*inv(q_cav_ij.precision) + r_ij*(theta_ji_hat - np.dot(m1.T,m1)) + r_ij*inv_r_ij*np.dot(m2.T,m2))
-
-        return Mvn(q_i[i].mean, q_i[i].precision)    
+        if den == 0:
+            den = 1        
+        return Mvn(mean/den, covar/den)    
 
 
     def fit(self, data):

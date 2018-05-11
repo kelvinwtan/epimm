@@ -13,22 +13,38 @@ class Mvn:
     Each Mvn is described by a d-sized vector mean and a dd-sized covariance matrix
     """
     def __init__(self, mean, precision, weight = 1):
-        self.mvn = mv(mean, inv(precision))
+        #self.mvn = mv(mean, inv(precision))
         self.mean = mean
         self.precision = precision
         self.weight = weight
 
     def __mul__(self, other):
+        if type(other) is int:
+            return self
+        precision_new = self.precision + other.precision
+        mean_new  =  np.dot(inv(precision_new), np.dot(self.precision,self.mean) + np.dot(other.precision, other.mean))
+        weight_new = 1#self.weight * other.weight
+        return Mvn(mean = mean_new, precision = precision_new, weight = weight_new)
+    
+    def __rmul__(self, other):
+        if type(other) is int:
+            return self
         precision_new = self.precision + other.precision
         mean_new  =  np.dot(inv(precision_new), np.dot(self.precision,self.mean) + np.dot(other.precision, other.mean))
         weight_new = 1#self.weight * other.weight
         return Mvn(mean = mean_new, precision = precision_new, weight = weight_new)
 
     def __div__(self, other):
+        if type(other) is int:
+            return self
         precision_new = self.precision - other.precision
         mean_new  =  np.dot(inv(precision_new), np.dot(self.precision,self.mean) - np.dot(other.precision, other.mean))
         weight_new = 1#self.weight * other.weight
         return Mvn(mean = mean_new, precision = precision_new, weight = weight_new)
+
+    def __rdiv__(self, other):
+        raise NotImplementedError
+        print("Use inv matrix to do division for now")
 
         @property
         def mean(self):

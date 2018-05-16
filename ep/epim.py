@@ -13,7 +13,7 @@ class Epim:
         self.innovation = Mvn(mean_base, pres_base)
 
         #fixed variance hyperparameter
-        self.precision_fixed = np.eye(len(mean_base))
+        self.precision_fixed = inv(np.eye(len(mean_base))*10000)
         self.covariance_fixed = inv(self.precision_fixed)
 
         #useful hyperparameters
@@ -29,270 +29,217 @@ class Epim:
         q_i = [None] * n
         for i in range(n):
             q_i[i] = 1
-        q_ij = [[None for _ in range(n)] for _ in range(n)]
 
-        q_i[0] = self.innovation
-        q_ij[0][0] = self.innovation                    
-        
+        t_i = [None] * n
+        for i in range(n):
+            t_i[i] = Mvn(data[0], self.precision_fixed)
+
+        t_ij = [[None for _ in range(n)] for _ in range(n)]              
+
         #ADF is a single iteration 
+        z_t_i = [None] * n
+        print("Begin factorisation of prior:")
+
+        exp1i = [None] * n
+        exp2i = [None] * n
+
+
         for i in range(1,n):
-            #for all j <= i
+            t1 = time.time()
             #generate message i -> j
-            new_qi = 1
+            z_i = 0
+            exp1 = 0
+            exp2 = 0
 
             for j in range(i+1):
                 #combine all parents of i
-                q_parent = 1
+                #print("1",new_qi)
+                #print(k,j+1)
+                new_ti = 1
                 if i == j:
-                    for k in range (j+1):
-                        #all parent points to j
-                        q_parent = q_parent*q_i[k]
+                    p = Mvn(self.innovation.mean, 0.5*self.precision_fixed)
+                    z_ii = p.pdf(data[i])
+
+                    t = self.innovation * Mvn(data[i], self.precision_fixed)
+
+                    z_i = z_i + self.alpha * z_ii
+                    exp1 = exp1 + self.alpha * z_ii * t.mean
+                    c = np.atleast_2d(t.mean)
+                    exp2 = exp2 + self.alpha* z_ii * (inv(t.precision) + np.dot(c.T,c))
+
                 else:
-                    for k in range (j) + range(j+1,i):
-                        #ALL POINTS <i + i NOT INCLUDING J
-                        #if q_i[k] != 1 and q_parent != 1:
-                        #   print(q_parent.mean,inv(q_parent.precision)," X ", q_i[k].mean, inv(q_i[k].precision))
-                        q_parent = q_parent*q_i[k]
-                        #print(q_parent.mean,inv(q_parent.precision))
-                #moment match the parent x true distribution
-                #q_parent*prior
-                #prior is the dirichlet process
-                z_i = 0
-                exp1 = 0
-                exp2 = 0
-                for k in range (j+1):
-                    if i == k:
-                        p = q_parent * self.innovation
-                        #print(i,k,p.mean,inv(p.precision))
+                    p = Mvn(data[j], 0.5*self.precision_fixed)
+                    z_ij = p.pdf(data[i])
 
-                        t = Mvn(q_parent.mean, inv(inv(q_parent.precision)+inv(self.precision_fixed)))
-                        z_ii = t.pdf(self.innovation.mean) * self.alpha
-                        z_i = z_i + z_ii
-                        exp1 = exp1 + z_ii * p.mean
-
-                        c = np.atleast_2d(p.mean)
-                        exp2 = exp2 + z_ii * (inv(p.precision) + np.dot(c.T,c))
-                    else:
-                        #if q_i[k]
-                        #p = Mvn(q_i[k].mean, inv(inv(q_i[i].precision) + inv(q_i[k].precision))) * q_parent
-                        p = Mvn(data[i], 2*self.precision_fixed) * q_parent
-                        #if q_parent != 1:
-                        #    print(i,k,q_parent.mean, inv(q_parent.precision), data[i], 2*self.precision_fixed)
-                        z_ij = p.pdf(data[k])
-                        z_i = z_i + z_ij
-
-                        sig = inv(2*self.precision_fixed)
-                        mu = np.dot(sig, np.dot(self.precision_fixed,data[i])+np.dot(self.precision_fixed,data[k]))
-
-                        c = np.atleast_2d(mu)
-                        sig = sig + np.dot(c.T,c)
-
-                        exp1 = exp1 + z_ij * mu
-                        exp2 = exp2 + z_ij * sig
-                
-                exp1 = exp1 / z_i
-                exp2 = exp2 / z_i
-                z_i /= (i - 1 + self.alpha)
-                c = np.atleast_2d(exp1)
-                m2 = np.dot(c.T,c)
-                mean = exp1
-                covar = exp2 - m2
-                print(covar)
-            
-                q_ij[i][j] = Mvn(mean, inv(covar))
-                new_qi = new_qi * q_ij[i][j]
-                #print(i,j,q_ij[i][j].mean, inv(q_ij[i][j].precision),self.check_posdef(inv(q_ij[i][j].precision)))
-                #print("ij q_i = ", i,j, new_qi.mean, inv(new_qi.precision), q_ij[i][j].mean, inv(q_ij[i][j].precision))
-            #print("q_i[i] i=",i," ",new_qi.mean, inv(new_qi.precision), self.check_posdef(inv(new_qi.precision)))
-            q_i[i] = new_qi
-        
-          #  print(q_i[i].mean, inv(q_i[i].precision))
-        return q_i, q_ij
-    """
-    def factorise_prior(self, data):
-        #Data (Number of features x Dimension of features)
-
-        n, d = data.shape
-        m_ij = np.ndarray(shape=(n,n,d))
-        v_ij = np.ndarray(shape=(n,n,d,d))
-        s_ij = np.ones(shape=(n,n))
-
-        qm = data
-        qp = self.precision_fixed
-
-        t_i = np.ones(n)
-
-
-        ntrue = 0
-        nfalse = 0
-        #calculate message i->j 
-        for i in range(n):
-            t1 = time.time()
-            #ii when i = 0 is just its own prior
-            if i == 0:
-                m_ij[0][0] = data[0]
-                v_ij[0][0] = self.precision_fixed
-                s_ij[0][0] = 1
-                continue
-            for j in range(i+1):
-                mu = 0
-                exp2 = 0
-
-                #N(tm, tp) is product of all the priors of the parents
-                tm = 0
-                tp = (j + 1)*qp
-                if i == j:
-                    for k in range (i):
-                        tm = tm + qm[k]
-                else:
-                    tm = qm[i]
-                    for k in range (j) + range(j+1,i):
-                        tm = tm + qm[k]
-                tm = np.dot(inv(tp),np.dot(qp,tm))
-
-                z_i = 0
-                #Marginals k < i
-                #For each team, find the marginal of each (delta x parents)
-
-                for k in range(i):
-                    new_pres = tp + qp
-                    new_mean = np.dot(inv(new_pres),(np.dot(tp,tm) + np.dot(qp,qm[k])))
-                    temp = Mvn(tm, inv(inv(tp) + inv(qp)))
-                    z_ij = temp.pdf(qm[k])*s_ij[i][j]
+                    t = Mvn(data[j], self.precision_fixed) * Mvn(data[i], self.precision_fixed)
                     z_i = z_i + z_ij
-                    mu = mu + new_mean * z_ij
-                    exp2 = exp2 + inv(new_pres) * z_ij
-                
-                new_pres = self.innovation.precision + tp
-                new_mean = np.dot(inv(new_pres), np.dot(self.innovation.precision, self.innovation.mean) + np.dot(tp,tm))
-                
-                temp = Mvn(tm, inv(inv(tp) + inv(self.innovation.precision)))
-                z_ii = temp.pdf(self.innovation.mean)*s_ij[i][j]
-                z_i = (z_i + self.alpha * z_ii)#/ (i - 1 + self.alpha)
-  
-                mu = (mu + self.alpha*new_mean*z_ii) / z_i
-                exp2 = (exp2 + self.alpha*inv(new_pres)*z_ii) / z_i
-                z_i = z_i/(i - 1 + self.alpha)
-  
-                c = np.atleast_2d(mu)
-                d = np.dot(c.T,c)
-                exp2 = exp2 - d
-                #print(exp2,d, exp2+d, self.check_posdef(exp2+d))
+                    exp1 = exp1 + z_ij*t.mean
+                    c = np.atleast_2d(t.mean)
+                    exp2 = exp2 + z_ij*(inv(t.precision) + np.dot(c.T,c))
 
-                s_ij[i][j] = 1/z_i
-                m_ij[i][j] = mu
-                v_ij[i][j] = inv(exp2)
-                
-                
-                #print(mu, " vs " , sig)
-                #print("sig")
-                if self.check_posdef(exp2) == True:
-                    ntrue +=1
-                else:
-                    nfalse +=1
-                #Mvn(mu,inv(sig))
-            t2 = time.time()
-            print("For i = "+str(i)+" time = "+ str(t2-t1))
-        
-        print(ntrue,nfalse)
-
-        while True:
-            for i in range (4):
-                a = 2
-        return m_ij, v_ij, s_ij
-    """
-                
-    def marginal(self, i, q_cavity_i):
-        #Find Z_i
-        if self.covar_type == "fixed":
-        #Z_ii = \int_{\theta} p(\theta)q^{\i}(\theta_i = \theta)d\theta
-            t = Mvn(q_cavity_i[i].mean, q_cavity_i[i].covar + self.innovation.covar)
-            z_ii = t.pdf(self.innovation.mean)
+            exp1i[i] = exp1
+            exp2i[i] = exp2
+            exp1 = exp1 / z_i
+            exp2 = exp2 / z_i
+            z_t_i[i] = z_i
+            z_i /= (i + self.alpha)
             
-            z_ji = []
-            for j in range(i):
-                #Z_ji = \int_{\theta} q^{\i}(\theta_j = \theta)q^{\i}(\theta_i = \theta)d\theta
-                t = Mvn(q_cavity_i[i].mean, q_cavity_i[i].covar + q_cavity_i[j].covar)
-                z_ji.append(t.pdf(q_cavity_i[j].mean))
-               
-            z_ji_total = 0
-            for k in z_ji:
-                z_ji_total += k
-            z_i = self.alpha * z_ii / (i - 1 + self.alpha) + z_ji_total / (i - 1 + self.alpha)     
-        else:
-            raise NotImplementedError
+            c = np.atleast_2d(exp1)
+            m2 = np.dot(c.T,c)
+            mean = exp1
+            covar = exp2 - m2
+            new_ti = new_ti * Mvn(mean, inv(covar))   
 
-        return z_i, z_ii, z_ji
+            t2 = time.time()
+            print("Factorising i = "+str(i)+" complete. Time taken: "+str(t2-t1))
 
-    def check_posdef(self, covar):
-        return np.all(np.linalg.eigvals(covar)>0)
-    
+        t_i[i] = new_ti
 
-    def moment_match(self, i, q_cav_i, f_ij, q_i):
-      #  z_i, z_ii, z_ji = self.marginal(i, q_cavity_i)
+        #print(t_i[i].mean, inv(t_i[i].precision))
+
+        t_ij[0][0] = 1
+        print("Beginning message calculation")
+        for i in range(1,n):
+            t3 = time.time()
+            for j in range(i+1):
+                mean = 0
+                covar = 0
+                if i == j:
+                    p = Mvn(self.innovation.mean, 0.5*self.precision_fixed)
+                    z_ii = p.pdf(data[i])
+                    t = self.innovation * Mvn(data[i], self.precision_fixed)
+                    new_zi = (z_t_i[i] - self.alpha *z_ii)
+
+                    mean = (exp1i[i] - self.alpha * z_ii * t.mean)/new_zi
+                    #z * z_t_i[i] * t_i[i].mean * self.alpha - t.mean* self.alpha) / ((i - self.alpha)*new_zi) 
+                    c1 = np.atleast_2d(t.mean)
+                    c2 = np.atleast_2d(mean)
+
+                    new_exp_v = (exp2i[i] - (self.alpha * z_ii * (inv(t.precision) + np.dot(c1.T,c1))))/new_zi
+                    covar = new_exp_v - np.dot(c2.T,c2)
+                    #covar = (z * z_t_i[i] * self.alpha * inv(t_i[i].precision) + np.dot(c2.T,c2) - self.alpha*(inv(t.precision) + np.dot(c1.T,c1))) / ((i - self.alpha) * new_zi)
+
+                else:
+                    p = Mvn(data[j], 0.5*self.precision_fixed)
+                    z_ii = p.pdf(data[i])
+                    t = Mvn(data[j], self.precision_fixed) * Mvn(data[i], self.precision_fixed)
+                    new_zi = (z_t_i[i] - self.alpha *z_ii)
+
+                    mean = (exp1i[i] - self.alpha * z_ii * t.mean)/new_zi
+                    #z * z_t_i[i] * t_i[i].mean * self.alpha - t.mean* self.alpha) / ((i - self.alpha)*new_zi) 
+                    c1 = np.atleast_2d(t.mean)
+                    c2 = np.atleast_2d(mean)
+
+                    new_exp_v = (exp2i[i] - (self.alpha * z_ii * (inv(t.precision) + np.dot(c1.T,c1))))/new_zi
+                    covar = new_exp_v - np.dot(c2.T,c2)
+                    
+                t_cav_ij = Mvn(mean, inv(covar)*0.999)
+                #print(t_i[i].mean, t_i[i].precision,mean, covar)
+                t_ij[i][j] = t_i[i]/t_cav_ij
+            t4 = time.time()
+            print("Messages for i = " + str(i) + " calculated. Time taken: " + str(t4-t3))
+        print("Message calculation completed")
+        
+        q = 1
+        for i in range(n):
+            q = q * t_i[i]
+
+
+        print("Prior approximation initialisation complete")
+        """
+        for i in range(n):
+            print(i, q_i[i].mean, inv(q_i[i].precision))
+        """
+
+        print("ADF Initial q is :",q.mean, inv(q.precision))
+        return t_i, t_ij
+
+    def moment_match(self, i, q_cav_i, q_i, f_ij):
         #r_j = []
         #First Moment Matching
-        r = 0
-        mean = 0
-        precision = 0
-        covar = 0
+
         z_i = 0
-        z_ij = [[None for _ in range(i+1)] for _ in range(i+1)]
-        theta_ji = [None for _ in range(i+1)]
-        theta_ji_hat = [None for _ in range(i+1)]
-        
-        flag = True
+        r_ij = [None for _ in range(i+1)]
+        theta_ij = [None for _ in range(i+1)]
+        theta_ij_hat = [None for _ in range(i+1)]
         
         exp1 = 0
         exp2 = 0
 
+        q_cav_ii = q_i[i] / f_ij[i][i]
+        # print(q_cav_i.mean, q_cav_ii.mean)
         for j in range(i+1):
-            print(i,j)
-            k = 0
             r_ji = 0
-            theta_ji = [None for _ in range(i+1)]
-            theta_ji_hat = [None for _ in range(i+1)]
 
-            q_cav_ij = q_cav_i / f_ij[i][j]
-
-            if self.check_posdef(inv(q_cav_ij.precision)):
-                flag = False
-                continue
+            q_cav_ij = q_i[i] / f_ij[i][j]
+            #q\i (theta_j)
+            # print(i,j)
+            if self.check_posdef(inv(q_cav_ij.precision)) == False:
+                return None
 
             if i == j:
                 #Expectation for each factor
-                t1 = self.innovation*q_cav_ij
-                t2 = Mvn(q_cav_ij.mean, inv(self.innovation.precision) + inv(q_cav_ij.precision))
+                t1 = self.innovation*q_cav_ii
+                t2 = Mvn(q_cav_ii.mean, inv(inv(self.innovation.precision) + inv(q_cav_ii.precision)))
             
                 z_ij = t2.pdf(self.innovation.mean)
                 z_i = z_i + z_ij
-                exp1 += t1.mean * self.alpha * z_ij
-                c = np.atleast_2d(t1.mean)
-                exp2 += (inv(t1.precision) + np.dot(c.T,c)) * self.alpha * z_ij
 
-                
+                k = self.alpha / (i + self.alpha)
+
+                r_ij[j] = k * z_ij
+
+                theta_ij[j] = t1.mean
+                c = np.atleast_2d(t1.mean)
+                theta_ij_hat[j] = inv(t1.precision) + np.dot(c.T,c)
 
             else:
                 #Expectaion for each factor
-                t1 = q_i[i] * q_cav_ij
-                t2 = Mvn(q_cav_ij.mean, inv(q_i[i].precision) + inv(q_cav_ij.precision))
-                
-                z_ij = t2.pdf(q_i[i].mean)
+                t1 = q_cav_ii * q_cav_ij
+                t2 = Mvn(q_cav_ij.mean, inv(inv(q_cav_ii.precision) + inv(q_cav_ij.precision)))
+                # print("cav",q_cav_ij.mean)
+                z_ij = t2.pdf(q_cav_ii.mean)
+                # print("zij", z_ij)
                 z_i = z_i + z_ij
-                exp1 += t1.mean * z_ij
+                
+                k = 1 / (i + self.alpha)
+
+                r_ij[j] = k * z_ij
+                theta_ij[j] = t1.mean
                 c = np.atleast_2d(t1.mean)
-                exp2 += (inv(t1.precision) + np.dot(c.T,c)) * z_ij
+                theta_ij_hat[j] = inv(t1.precision) + np.dot(c.T,c)
 
-        den = (z_i*(i - 1 + self.alpha))
-        if den == 0:
-            return q_cav_i
+        exp1 = 0
+        exp2 = 0
+        for j in range(i+1):
+            r_ij[j] = r_ij[j]/z_i
+            exp1 = exp1 + theta_ij[j] * r_ij[j]
+            exp2 = exp2 + theta_ij_hat[j] * r_ij[j]
 
-        
-        mean = exp1 / den
-        covar = exp2 /den
+        mean = exp1
         c = np.atleast_2d(mean)
-        covar = covar - np.dot(c.T,c)        
-        return Mvn(mean, covar)    
+        covar = exp2 - np.dot(c.T,c)        
+
+        for j in range(i):
+            # if theta_ij[j] is None:
+            #     continue
+            q_cav_ij = q_i[i] / f_ij[i][j]
+            c1 = np.atleast_2d(theta_ij[j])
+            c2 = np.atleast_2d(theta_ij[j] - q_cav_ij.mean)
+
+            r = r_ij[j]
+            inv_r = 1 - r
+            #q_i[j].mean = inv_r*q_cav_ij.mean + r*(theta_ij[j])
+            #q_i[j].precision = inv(inv_r*inv(q_cav_ij.precision) + r*(theta_ij_hat[j] - np.dot(c1.T,c1)) + r*inv_r*np.dot(c2.T,c2))
+            # print(j, q_i[j].mean, q_i[j].precision)
+        q_i[i].mean = mean
+        q_i[i].precision = inv(covar)
+        #print(inv(q_cav_i.precision), inv(q_i[i].precision))
+        # print("i",i, q_i[i].mean, q_i[i].precision)
+        q = 1
+        for factor in q_i:
+            q = q*factor
+        return q
 
 
     def fit(self, data):
@@ -301,86 +248,76 @@ class Epim:
         #q_i = self.set_up(data)
         n, dim = data.shape        
         f_i, f_ij = self.factorise_prior(data)
+        
+        q_i = [None for _ in range(n)]
+        for i in range(n):
+            q_i[i] = Mvn(data[i], self.precision_fixed)
+
         q = 1
-        for i in f_i:
-            q = q*i
+        for f in q_i:
+            q = q*f
+
+        adf = 1
+        for f in f_i:
+            q = q*f
+            adf = adf*f
+
 
         print("initial q approximation is ", q.mean, inv(q.precision))
-        q_i = []
-        for i in range(n):
-            q_i.append(Mvn(data[0],self.precision_fixed))
 
         #Until all f_i converge
-        i = 0
-        iterations = 0
+        i = 1
+        converge_count = 0
         converged = False
+        iteration = 0
         print("Set up finished, beginning approximating until convergence")
         while True:
-            if i == n:
-                i = 0
-            #DELETION STEP
-            q_cav_i = q/f_i[i] 
-            if self.check_posdef(inv(q_cav_i.precision)) == False:
-                i += 1
-                continue
-            """
-            if np.all(np.linalg.eigvals(inv(q_cav_i.precision)) > 0):
-                i+=1
-                print("ALERT: non semidef pos covar detected")
-                continue
-            """
-            #moment matching
-            old_mean = q.mean
-            q = self.moment_match(i, q_cav_i, f_ij, q_i)
-                    
-            f_i[i] = q / q_i[i]
             
-            i += 1
-            
-            dist = np.linalg.norm(old_mean-q.mean)
-            print(dist)
-            if(dist < 0.01):
-                break
-            
-        print("FINISHED")
-        for i in f_i:
-            print(i.mean)
+            print("Iteration number: " + str(iteration))
+            total_convergence = 0
+            converge_count = 0
+            for i in range(1,n):
+
+                #deletion
+                #print(q.mean, f_i[i].mean)
+                q_cav_i = q / f_i[i]
+
+                #moment matching
+                oldm = f_i[i].mean
+                oldp = f_i[i].precision
+                new_q = self.moment_match(i, q_cav_i, f_i, f_ij)
+                if new_q is None:
+                    continue
+                q = new_q
+                #update
+                a = 1
+                b = 1
+                for j in range(i+1):
+                    a = a * q_i[j]
+                    b = b * f_ij[i][j]
+                f_i[i] = a/b           
+
+                #checking for convergence
+                dist_mean = np.linalg.norm(oldm-f_i[i].mean)
+                dist_pres = np.linalg.norm(oldp - f_i[i].precision)
+                
+                total_convergence = dist_mean + dist_pres
 
 
-        """
-            break
-            if i >= len(q_i):
-                #print("interation")
-                i = 0
-                converged = True
-            old_f_i = f_i[i]
-         
-            #DELETION STEP
-            try:
-                t  = q_i[i]/f_i[i]
-            except ValueError:
-                i+=1
-                continue
-
-
-            q_cavity_i[i] = t
-            q_i = self.moment_match(i, q_cavity_i, q_i)
-
-            try:
-                f_i[i] = q_i[i]/q_cavity_i[i]
-                print(f_i[i].covar)
-            except ValueError:
-                i+=1
-                continue
-            
-            dist = np.linalg.norm(f_i[i].mean - old_f_i.mean)
-            print(dist)
-            if(dist < self.convergence_threshold):
-                converged = True
-
-            if converged == True and i == len(q_i):
-                break
-            i += 1
-            iterations += 1
-        print("Finished EP")
-        """
+                #print(new_q.mean, inv(new_q.precision), dist_mean)
+                #print(dist_mean, f_i[i].mean, old_f.mean)
+                if dist_mean < self.convergence_threshold and dist_pres < self.convergence_threshold:
+                    converge_count = n
+                    break
+                    #once one converges, no update will be changed to factor. so all factors converge once one has
+            print("EP converges when this reaches 0: -> " + str(total_convergence))            
+            if converge_count == n:
+                print("Convergence found. EP is complete and now exiting")
+                break            
+            iteration += 1
+        print("Found posterior has form")
+        print("ADF:", adf.mean, inv(adf.precision))
+        print("EP:",q.mean, inv(q.precision))
+    def check_posdef(self, matrix):
+        return np.all(np.linalg.eigvals(matrix)>0)
+    

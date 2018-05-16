@@ -23,7 +23,15 @@ class Mvn:
             return self
         precision_new = self.precision + other.precision
         mean_new  =  np.dot(inv(precision_new), np.dot(self.precision,self.mean) + np.dot(other.precision, other.mean))
-        weight_new = 1#self.weight * other.weight
+        
+        p = Mvn(other.mean, inv(inv(other.precision) + inv(self.precision)))
+        
+        r = p.pdf(self.mean) * self.weight * other.weight
+        if r < 1e-200:
+            weight_new = 1e-200
+        else:
+            weight_new = r
+
         return Mvn(mean = mean_new, precision = precision_new, weight = weight_new)
     
     def __rmul__(self, other):
@@ -31,7 +39,16 @@ class Mvn:
             return self
         precision_new = self.precision + other.precision
         mean_new  =  np.dot(inv(precision_new), np.dot(self.precision,self.mean) + np.dot(other.precision, other.mean))
-        weight_new = 1#self.weight * other.weight
+        
+        p = Mvn(other.mean, inv(inv(other.precision) + inv(self.precision)))
+
+
+        r = p.pdf(self.mean) * self.weight * other.weight
+        if r < 1e-200:
+            weight_new = 1e-200
+        else:
+            weight_new = r
+
         return Mvn(mean = mean_new, precision = precision_new, weight = weight_new)
 
     def __div__(self, other):
@@ -39,7 +56,15 @@ class Mvn:
             return self
         precision_new = self.precision - other.precision
         mean_new  =  np.dot(inv(precision_new), np.dot(self.precision,self.mean) - np.dot(other.precision, other.mean))
-        weight_new = 1#self.weight * other.weight
+        
+
+        a = np.linalg.det(other.precision)
+        b = np.linalg.det(inv(other.precision) - inv(self.precision))
+
+        w = a/b
+        p = Mvn(other.mean, inv(inv(other.precision) - inv(self.precision)))
+        weight_new = (w/p.pdf(self.mean))*self.weight/other.weight
+
         return Mvn(mean = mean_new, precision = precision_new, weight = weight_new)
 
     def __rdiv__(self, other):
@@ -71,12 +96,23 @@ class Mvn:
             self.weight = v
 
     def pdf(self, x):
+
         """
         Returns PDF of MVN at point x
         """
-        mvn = mv(self.mean,inv(self.precision))
-        return mvn.pdf(x)
-   
+        m = np.atleast_2d(x - self.mean)
+        expo = -0.5*np.dot(np.dot(m,self.precision),m.T)
+        s = (2*np.pi)**m.shape[1]
+
+        #test =  mv.pdf(x, mean=self.mean, cov=inv(self.precision))
+        ret = np.sqrt(np.linalg.det(self.precision)/s) * np.exp(expo)
+        # print("nan???",self.mean, self.precision, x,ret[0][0]*self.weight)
+        # print(self.weight, self.precision)
+        if ret[0][0] * self.weight < 1e-200:
+            return 1e-200
+
+        return ret[0][0] * self.weight
+        #return mv.pdf(x, mean=self.mean, cov=inv(self.precision))
+
     def logpdf(self, x):
-        mvn = mv(self.mean,inv(self.precision))
-        return mvn.logpdf(x)
+        return mv.logpdf(x, mean=self.mean, cov=inv(self.precision))

@@ -23,15 +23,19 @@ class Mvn:
             return self
         precision_new = self.precision + other.precision
         mean_new  =  np.dot(inv(precision_new), np.dot(self.precision,self.mean) + np.dot(other.precision, other.mean))
-        
         p = Mvn(other.mean, inv(inv(other.precision) + inv(self.precision)))
-        
         r = p.pdf(self.mean) * self.weight * other.weight
-        if r < 1e-200:
-            weight_new = 1e-200
+
+        # weight_new = r
+        if r < 1e-300:
+            weight_new = 1e-300
+        elif r > 1e300:
+            weight_new = 1e300
         else:
             weight_new = r
 
+        # if r > 1e200:
+        #     print(weight_new)
         return Mvn(mean = mean_new, precision = precision_new, weight = weight_new)
     
     def __rmul__(self, other):
@@ -41,8 +45,6 @@ class Mvn:
         mean_new  =  np.dot(inv(precision_new), np.dot(self.precision,self.mean) + np.dot(other.precision, other.mean))
         
         p = Mvn(other.mean, inv(inv(other.precision) + inv(self.precision)))
-
-
         r = p.pdf(self.mean) * self.weight * other.weight
         if r < 1e-200:
             weight_new = 1e-200

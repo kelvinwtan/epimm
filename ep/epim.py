@@ -1,19 +1,18 @@
 from mvn import Mvn
 import numpy as np
 from numpy.linalg import inv
-
-
 import time
 
-class Epim:
+class EPIMM:
         
-    def __init__(self, alpha, mean_base, pres_base):
+    def __init__(self, alpha, mean_base, pres_base, precision_fixed):
         #Dirichlet Hyperparameters
         self.alpha = alpha
         self.innovation = Mvn(mean_base, pres_base)
 
         #fixed variance hyperparameter
-        self.precision_fixed = inv(np.eye(len(mean_base))*10000)
+        self.precision_fixed = precision_fixed
+        #self.precision_fixed = inv(np.eye(len(mean_base))*10000)
         self.covariance_fixed = inv(self.precision_fixed)
 
         #useful hyperparameters
@@ -50,11 +49,7 @@ class Epim:
             z_i = 0
             exp1 = 0
             exp2 = 0
-
             for j in range(i+1):
-                #combine all parents of i
-                #print("1",new_qi)
-                #print(k,j+1)
                 new_ti = 1
                 if i == j:
                     p = Mvn(self.innovation.mean, 0.5*self.precision_fixed)
@@ -94,9 +89,6 @@ class Epim:
             print("Factorising i = "+str(i)+" complete. Time taken: "+str(t2-t1))
 
         t_i[i] = new_ti
-
-        #print(t_i[i].mean, inv(t_i[i].precision))
-
         t_ij[0][0] = 1
         print("Beginning message calculation")
         for i in range(1,n):
@@ -111,13 +103,11 @@ class Epim:
                     new_zi = (z_t_i[i] - self.alpha *z_ii)
 
                     mean = (exp1i[i] - self.alpha * z_ii * t.mean)/new_zi
-                    #z * z_t_i[i] * t_i[i].mean * self.alpha - t.mean* self.alpha) / ((i - self.alpha)*new_zi) 
                     c1 = np.atleast_2d(t.mean)
                     c2 = np.atleast_2d(mean)
 
                     new_exp_v = (exp2i[i] - (self.alpha * z_ii * (inv(t.precision) + np.dot(c1.T,c1))))/new_zi
                     covar = new_exp_v - np.dot(c2.T,c2)
-                    #covar = (z * z_t_i[i] * self.alpha * inv(t_i[i].precision) + np.dot(c2.T,c2) - self.alpha*(inv(t.precision) + np.dot(c1.T,c1))) / ((i - self.alpha) * new_zi)
 
                 else:
                     p = Mvn(data[j], 0.5*self.precision_fixed)
@@ -126,7 +116,6 @@ class Epim:
                     new_zi = (z_t_i[i] - self.alpha *z_ii)
 
                     mean = (exp1i[i] - self.alpha * z_ii * t.mean)/new_zi
-                    #z * z_t_i[i] * t_i[i].mean * self.alpha - t.mean* self.alpha) / ((i - self.alpha)*new_zi) 
                     c1 = np.atleast_2d(t.mean)
                     c2 = np.atleast_2d(mean)
 
@@ -134,7 +123,6 @@ class Epim:
                     covar = new_exp_v - np.dot(c2.T,c2)
                     
                 t_cav_ij = Mvn(mean, inv(covar)*0.999)
-                #print(t_i[i].mean, t_i[i].precision,mean, covar)
                 t_ij[i][j] = t_i[i]/t_cav_ij
             t4 = time.time()
             print("Messages for i = " + str(i) + " calculated. Time taken: " + str(t4-t3))
@@ -146,15 +134,10 @@ class Epim:
 
 
         print("Prior approximation initialisation complete")
-        """
-        for i in range(n):
-            print(i, q_i[i].mean, inv(q_i[i].precision))
-        """
-
         print("ADF Initial q is :",q.mean, inv(q.precision))
         return t_i, t_ij
 
-    def moment_match(self, i, q_cav_i, q_i, f_ij):
+    def moment_match(self, i, q_i, f_ij):
         #r_j = []
         #First Moment Matching
 
@@ -221,34 +204,33 @@ class Epim:
         covar = exp2 - np.dot(c.T,c)        
 
         for j in range(i):
-            # if theta_ij[j] is None:
-            #     continue
             q_cav_ij = q_i[i] / f_ij[i][j]
             c1 = np.atleast_2d(theta_ij[j])
             c2 = np.atleast_2d(theta_ij[j] - q_cav_ij.mean)
 
             r = r_ij[j]
             inv_r = 1 - r
-            #q_i[j].mean = inv_r*q_cav_ij.mean + r*(theta_ij[j])
-            #q_i[j].precision = inv(inv_r*inv(q_cav_ij.precision) + r*(theta_ij_hat[j] - np.dot(c1.T,c1)) + r*inv_r*np.dot(c2.T,c2))
-            # print(j, q_i[j].mean, q_i[j].precision)
         q_i[i].mean = mean
         q_i[i].precision = inv(covar)
-        #print(inv(q_cav_i.precision), inv(q_i[i].precision))
-        # print("i",i, q_i[i].mean, q_i[i].precision)
         q = 1
         for factor in q_i:
             q = q*factor
         return q
 
 
-    def fit(self, data):
+    def fit(self, data, t_i = None, t_ij = None):
         # for each x_{i} in data, assign each point as a part of a distribution with the point as a mean and a fixed var
         #Initialise EP
         #q_i = self.set_up(data)
         n, dim = data.shape        
-        f_i, f_ij = self.factorise_prior(data)
-        
+
+        if t_i == None and t_ij == None:
+            f_i, f_ij = self.factorise_prior(data)
+        else:
+            f_i = t_i
+            f_ij = t_ij
+            print("Prior calculated factors given, will use instead")
+
         q_i = [None for _ in range(n)]
         for i in range(n):
             q_i[i] = Mvn(data[i], self.precision_fixed)
@@ -278,14 +260,12 @@ class Epim:
             converge_count = 0
             for i in range(1,n):
 
-                #deletion
-                #print(q.mean, f_i[i].mean)
-                q_cav_i = q / f_i[i]
+                #q_cav_i = q / f_i[i]
 
                 #moment matching
                 oldm = f_i[i].mean
                 oldp = f_i[i].precision
-                new_q = self.moment_match(i, q_cav_i, f_i, f_ij)
+                new_q = self.moment_match(i, f_i, f_ij)
                 if new_q is None:
                     continue
                 q = new_q
@@ -318,6 +298,7 @@ class Epim:
         print("Found posterior has form")
         print("ADF:", adf.mean, inv(adf.precision))
         print("EP:",q.mean, inv(q.precision))
+
     def check_posdef(self, matrix):
         return np.all(np.linalg.eigvals(matrix)>0)
     
